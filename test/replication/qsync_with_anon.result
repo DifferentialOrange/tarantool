@@ -19,6 +19,44 @@ _ = box.schema.space.create('sync', {is_sync=true})
 _ = box.space.sync:create_index('pk')
  | ---
  | ...
+box.ctl.promote()
+ | ---
+ | ...
+-- Testcase body.
+test_run:switch('default')
+ | ---
+ | - true
+ | ...
+box.space.sync:insert{1} -- success
+ | ---
+ | - [1]
+ | ...
+box.space.sync:insert{2} -- success
+ | ---
+ | - [2]
+ | ...
+box.space.sync:insert{3} -- success
+ | ---
+ | - [3]
+ | ...
+test_run:cmd('switch replica_anon')
+ | ---
+ | - true
+ | ...
+box.space.sync:select{} -- 1, 2, 3
+ | ---
+ | - - [1]
+ |   - [2]
+ |   - [3]
+ | ...
+-- Testcase cleanup.
+test_run:switch('default')
+ | ---
+ | - true
+ | ...
+box.space.sync:drop()
+ | ---
+ | ...
 
 
 -- Setup a cluster with anonymous replica
@@ -73,4 +111,20 @@ test_run:cmd('cleanup server replica_anon')
 test_run:cmd('delete server replica_anon')
  | ---
  | - true
+ | ...
+
+box.schema.user.revoke('guest', 'replication')
+ | ---
+ | ...
+box.cfg{                                                                        \
+    replication_synchro_quorum = orig_synchro_quorum,                           \
+    replication_synchro_timeout = orig_synchro_timeout,                         \
+}
+ | ---
+ | ...
+box.ctl.demote()
+ | ---
+ | ...
+test_run:cleanup_cluster()
+ | ---
  | ...
