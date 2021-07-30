@@ -424,8 +424,7 @@ wal_stream_apply_synchro_row(struct wal_stream *stream, struct xrow_header *row)
 		say_error("couldn't decode a synchro request");
 		return -1;
 	}
-	txn_limbo_process(&txn_limbo, &syn_req);
-	return 0;
+	return txn_limbo_process(&txn_limbo, &syn_req);
 }
 
 static int
@@ -1670,47 +1669,42 @@ box_wait_limbo_acked(double timeout)
 	return wait_lsn;
 }
 
-/** Write and process a PROMOTE request. */
-static void
-box_issue_promote(uint32_t prev_leader_id, int64_t promote_lsn)
+/** Write and process PROMOTE or DEMOTE request. */
+static int
+box_issue_synchro(uint16_t type, uint32_t prev_leader_id, int64_t promote_lsn)
 {
 	struct raft *raft = box_raft();
+
+	assert(type == IPROTO_RAFT_PROMOTE ||
+	       type == IPROTO_RAFT_DEMOTE);
 	assert(raft->volatile_term == raft->term);
 	assert(promote_lsn >= 0);
-	txn_limbo_write_promote(&txn_limbo, promote_lsn,
-				raft->term);
+
 	struct synchro_request req = {
-		.type = IPROTO_RAFT_PROMOTE,
-		.replica_id = prev_leader_id,
-		.origin_id = instance_id,
-		.lsn = promote_lsn,
-		.term = raft->term,
+		.type		= type,
+		.replica_id	= prev_leader_id,
+		.origin_id	= instance_id,
+		.lsn		= promote_lsn,
+		.term		= raft->term,
 	};
-	txn_limbo_process(&txn_limbo, &req);
+
+	if (txn_limbo_process_begin(&txn_limbo, &req) != 0)
+		return -1;
+
+	if (type == IPROTO_RAFT_PROMOTE)
+		txn_limbo_write_promote(&txn_limbo, req.lsn, req.term);
+	else
+		txn_limbo_write_demote(&txn_limbo, req.lsn, req.term);
+
+	txn_limbo_process_run(&txn_limbo, &req);
 	assert(txn_limbo_is_empty(&txn_limbo));
+
+	txn_limbo_process_commit(&txn_limbo);
+	return 0;
 }
 
 /** A guard to block multiple simultaneous promote()/demote() invocations. */
 static bool is_in_box_promote = false;
-
-/** Write and process a DEMOTE request. */
-static void
-box_issue_demote(uint32_t prev_leader_id, int64_t promote_lsn)
-{
-	assert(box_raft()->volatile_term == box_raft()->term);
-	assert(promote_lsn >= 0);
-	txn_limbo_write_demote(&txn_limbo, promote_lsn,
-				box_raft()->term);
-	struct synchro_request req = {
-		.type = IPROTO_RAFT_DEMOTE,
-		.replica_id = prev_leader_id,
-		.origin_id = instance_id,
-		.lsn = promote_lsn,
-		.term = box_raft()->term,
-	};
-	txn_limbo_process(&txn_limbo, &req);
-	assert(txn_limbo_is_empty(&txn_limbo));
-}
 
 int
 box_promote_qsync(void)
@@ -1732,8 +1726,8 @@ box_promote_qsync(void)
 		diag_set(ClientError, ER_NOT_LEADER, raft->leader);
 		return -1;
 	}
-	box_issue_promote(txn_limbo.owner_id, wait_lsn);
-	return 0;
+	return box_issue_synchro(IPROTO_RAFT_PROMOTE,
+				 txn_limbo.owner_id, wait_lsn);
 }
 
 int
@@ -1789,9 +1783,8 @@ box_promote(void)
 	if (wait_lsn < 0)
 		return -1;
 
-	box_issue_promote(txn_limbo.owner_id, wait_lsn);
-
-	return 0;
+	return box_issue_synchro(IPROTO_RAFT_PROMOTE,
+				 txn_limbo.owner_id, wait_lsn);
 }
 
 int
@@ -1826,8 +1819,8 @@ box_demote(void)
 	int64_t wait_lsn = box_wait_limbo_acked(replication_synchro_timeout);
 	if (wait_lsn < 0)
 		return -1;
-	box_issue_demote(txn_limbo.owner_id, wait_lsn);
-	return 0;
+	return box_issue_synchro(IPROTO_RAFT_DEMOTE,
+				 txn_limbo.owner_id, wait_lsn);
 }
 
 int
