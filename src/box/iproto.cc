@@ -227,14 +227,15 @@ iproto_service_array_stop_listen(struct iproto_service_array *array)
 
 static inline int
 iproto_service_array_bind(struct iproto_service_array *array,
-			  const char **uri_array, int count)
+			  const struct cfg_uri_array *uri_array)
 {
-	assert(count <= IPROTO_LISTEN_SOCKET_MAX);
+	assert(uri_array->size <= IPROTO_LISTEN_SOCKET_MAX);
 	for (array->service_count = 0;
-	     array->service_count < count;
+	     array->service_count < uri_array->size;
 	     array->service_count++) {
 		int i = array->service_count;
-		if (evio_service_bind(&array->services[i], uri_array[i]) != 0)
+		if (evio_service_bind(&array->services[i],
+				      uri_array->uris[i].host) != 0)
 			return -1;
 	}
 	return 0;
@@ -3088,9 +3089,9 @@ iproto_stop_listen(bool was_bind)
 }
 
 int
-iproto_listen(const char **uri_array, int size)
+iproto_listen(const struct cfg_uri_array *uri_array)
 {
-	assert(size <= IPROTO_LISTEN_SOCKET_MAX);
+	assert(uri_array->size <= IPROTO_LISTEN_SOCKET_MAX);
 	if (iproto_stop_listen(true) != 0)
 		return -1;
 	bool was_bind = false;
@@ -3100,7 +3101,7 @@ iproto_listen(const char **uri_array, int size)
 	 * implementation, we rely on the Linux kernel to distribute
 	 * incoming connections across iproto threads.
 	 */
-	if (iproto_service_array_bind(&tx_service_array, uri_array, size) != 0)
+	if (iproto_service_array_bind(&tx_service_array, uri_array) != 0)
 		goto error;
 	was_bind = true;
 	if (iproto_send_listen_msg(&tx_service_array) != 0)

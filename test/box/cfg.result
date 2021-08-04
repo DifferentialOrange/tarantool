@@ -267,9 +267,10 @@ box.cfg{sherlock = 'holmes'}
  | ...
 
 -- check that cfg with unexpected type of parameter fails
-box.cfg{listen = {}}
+box.cfg{listen = true}
  | ---
- | - error: 'Incorrect value for option ''listen'': should be one of types string, number'
+ | - error: 'Incorrect value for option ''listen'': should be one of types string, number,
+ |     table'
  | ...
 box.cfg{wal_dir = 0}
  | ---
