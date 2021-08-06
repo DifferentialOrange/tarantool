@@ -13,6 +13,7 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_BINARY_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/src/box)
 include_directories(${CMAKE_SOURCE_DIR}/third_party)
+include_directories(${CMAKE_SOURCE_DIR}/third_party/coro)
 include_directories(${ICU_INCLUDE_DIRS})
 include_directories(${CURL_INCLUDE_DIRS})
 
@@ -286,3 +287,8 @@ target_link_libraries(backtrace_unw_coro.test core unit)
 
 add_executable(backtrace_rip_coro.test backtrace_rip_coro.c core_test_utils.c)
 target_link_libraries(backtrace_rip_coro.test core unit)
+
+if (CMAKE_BUILD_TYPE MATCHES Debug)
+    add_executable(backtrace.test backtrace.c core_test_utils.c)
+    target_link_libraries(backtrace.test core unit)
+endif ()
