@@ -280,3 +280,9 @@ target_link_libraries(popen.test misc unit core)
 
 add_executable(serializer.test serializer.c)
 target_link_libraries(serializer.test unit box ${LUAJIT_LIBRARIES})
+
+add_executable(backtrace_unw_coro.test backtrace_unw_coro.c core_test_utils.c)
+target_link_libraries(backtrace_unw_coro.test core unit)
+
+add_executable(backtrace_rip_coro.test backtrace_rip_coro.c core_test_utils.c)
+target_link_libraries(backtrace_rip_coro.test core unit)
