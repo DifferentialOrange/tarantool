@@ -10,18 +10,16 @@ local Server = t.Server
 g.before_all(function()
     g.master = Server:new({
         alias = 'master',
-        command = './test/replication-luatest/instance_files/master.lua',
+        command = './test/replication-luatest/instance_files/master_quorum.lua',
         workdir = fio.tempdir(),
-        http_port = 8081,
         net_box_port = 13301,
     })
 
     g.replica = Server:new({
         alias = 'replica',
-        command = './test/replication-luatest/instance_files/replica.lua',
+        command = './test/replication-luatest/instance_files/replica_anon.lua',
         workdir = fio.tempdir(),
         env = {TARANTOOL_MASTER = '13301'},
-        http_port = 8082,
         net_box_port = 13302,
     })
 
