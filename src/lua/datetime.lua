@@ -52,6 +52,8 @@ int     tnt_dt_doy          (dt_t dt);
 int     tnt_dt_dom          (dt_t dt);
 
 /* dt_parse_iso.h definitions */
+size_t tnt_dt_parse_iso_date (const char *str, size_t len, dt_t *dt);
+size_t tnt_dt_parse_iso_time (const char *str, size_t len, int *sod, int *nsec);
 size_t tnt_dt_parse_iso_zone_lenient(const char *str, size_t len, int *offset);
 
 /* Tarantool functions - datetime.c */
@@ -213,6 +215,9 @@ local function datetime_new_raw(epoch, nsec, tzoffset)
 end
 
 local function datetime_new_dt(dt, secs, nanosecs, offset)
+    secs = secs or 0
+    nanosecs = nanosecs or 0
+    offset = offset or 0
     local epoch = (dt - DAYS_EPOCH_OFFSET) * SECS_PER_DAY
     return datetime_new_raw(epoch + secs - offset * 60, nanosecs, offset)
 end
@@ -355,6 +360,88 @@ local function datetime_tostring(self)
 end
 
 --[[
+    Parse partial ISO-8601 date string
+
+    Accepetd formats are:
+
+    Basic      Extended
+    20121224   2012-12-24   Calendar date   (ISO 8601)
+    2012359    2012-359     Ordinal date    (ISO 8601)
+    2012W521   2012-W52-1   Week date       (ISO 8601)
+    2012Q485   2012-Q4-85   Quarter date
+
+    Returns pair of constructed datetime object, and length of string
+    which has been accepted by parser.
+]]
+
+local function parse_date(str)
+    check_str("datetime.parse_date()")
+    local dt = ffi.new('dt_t[1]')
+    local len = tonumber(builtin.tnt_dt_parse_iso_date(str, #str, dt))
+    if len == 0 then
+        error(('invalid date format %s'):format(str), 2)
+    end
+    return datetime_new_dt(dt[0]), len
+end
+
+--[[
+    aggregated parse functions
+    assumes to deal with date T time time_zone
+    at once
+
+    date [T] time [ ] time_zone
+
+    Returns constructed datetime object.
+]]
+local function parse(str)
+    check_str("datetime.parse()")
+    local dt = ffi.new('dt_t[1]')
+    local len = #str
+    local n = builtin.tnt_dt_parse_iso_date(str, len, dt)
+    local dt_ = dt[0]
+    if n == 0 or len == n then
+        return datetime_new_dt(dt_)
+    end
+
+    str = str:sub(tonumber(n) + 1)
+
+    local ch = str:sub(1, 1)
+    if ch:match('[Tt ]') == nil then
+        return datetime_new_dt(dt_)
+    end
+
+    str = str:sub(2)
+    len = #str
+
+    local sp = ffi.new('int[1]')
+    local fp = ffi.new('int[1]')
+    local n = builtin.tnt_dt_parse_iso_time(str, len, sp, fp)
+    if n == 0 then
+        return datetime_new_dt(dt_)
+    end
+    local sp_ = sp[0]
+    local fp_ = fp[0]
+    if len == n then
+        return datetime_new_dt(dt_, sp_, fp_)
+    end
+
+    str = str:sub(tonumber(n) + 1)
+
+    if str:sub(1, 1) == ' ' then
+        str = str:sub(2)
+    end
+
+    len = #str
+
+    local offset = ffi.new('int[1]')
+    n = builtin.tnt_dt_parse_iso_zone_lenient(str, len, offset)
+    if n == 0 then
+        return datetime_new_dt(dt_, sp_, fp_)
+    end
+    return datetime_new_dt(dt_, sp_, fp_, offset[0])
+end
+
+--[[
     Dispatch function to create datetime from string or table.
     Creates default timeobject (pointing to Epoch date) if
     called without arguments.
@@ -362,6 +449,8 @@ end
 local function datetime_from(o)
     if o == nil or type(o) == 'table' then
         return datetime_new(o)
+    elseif type(o) == 'string' then
+        return parse(o)
     end
 end
 
@@ -614,6 +703,9 @@ return setmetatable(
         new         = datetime_new,
 
         now         = datetime_now,
+
+        parse       = parse,
+        parse_date  = parse_date,
 
         is_datetime = is_datetime,
     }, {
