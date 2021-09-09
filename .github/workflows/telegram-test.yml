@@ -1,0 +1,22 @@
+name: Test TypeScript Telegram Bot
+on: [push]
+jobs:
+  telegram-bot-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Check Commit SHA
+        run: |
+          git checkout 123456
+      - name: Sending Message to Telegram Chat
+        uses: ./.github/actions/typescript-telegram-notifier
+        if: failure()
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          to: ${{ secrets.TELEGRAM_TO }}
+          parse_mode: MarkdownV2
+          disable_web_page_preview: true
