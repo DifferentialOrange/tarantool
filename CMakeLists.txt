@@ -580,6 +580,14 @@ libccdt_build()
 add_dependencies(build_bundled_libs cdt)
 
 #
+# portion of Olson tzcode
+#
+
+include(BuildTZ)
+libtzcode_build()
+add_dependencies(build_bundled_libs tzcode)
+
+#
 # Third-Party misc
 #
 

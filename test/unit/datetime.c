@@ -136,31 +136,6 @@ exit:
 	return 0;
 }
 
-static int
-local_rd(const struct datetime *dt)
-{
-	return (int)((int64_t)dt->epoch / SECS_PER_DAY) + DT_EPOCH_1970_OFFSET;
-}
-
-static int
-local_dt(const struct datetime *dt)
-{
-	return dt_from_rdn(local_rd(dt));
-}
-
-
-static void
-datetime_to_tm(struct datetime *dt, struct tm *tm)
-{
-	memset(tm, 0, sizeof(*tm));
-	dt_to_struct_tm(local_dt(dt), tm);
-
-	int seconds_of_day = (int64_t)dt->epoch % 86400;
-	tm->tm_hour = (seconds_of_day / 3600) % 24;
-	tm->tm_min = (seconds_of_day / 60) % 60;
-	tm->tm_sec = seconds_of_day % 60;
-}
-
 static void
 datetime_test(void)
 {
@@ -190,18 +165,17 @@ datetime_test(void)
 		 */
 		static char buff[40];
 		struct datetime dt = { secs, nanosecs, offset, 0 };
-		/* datetime_to_tm returns time in GMT zone */
-		struct tm tm = { .tm_sec = 0 };
+		struct tnt_tm tm = { .tm_sec = 0 };
 		datetime_to_tm(&dt, &tm);
-		size_t len = strftime(buff, sizeof(buff), "%F %T", &tm);
+		size_t len = tnt_strftime(buff, sizeof(buff), "%F %T%z", &tm);
 		ok(len > 0, "strftime");
 		int64_t parsed_secs;
 		int32_t parsed_nsecs, parsed_ofs;
 		rc = parse_datetime(buff, len, &parsed_secs, &parsed_nsecs,
 				    &parsed_ofs);
 		is(rc, 0, "correct parse_datetime return value for '%s'", buff);
-		is(secs, parsed_secs, "reversible seconds via strftime for '%s",
-		   buff);
+		is(secs, parsed_secs,
+		   "reversible seconds via strftime for '%s'", buff);
 	}
 	check_plan();
 }
