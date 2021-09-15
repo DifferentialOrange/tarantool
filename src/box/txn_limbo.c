@@ -774,6 +774,20 @@ txn_limbo_process_run(struct txn_limbo *limbo,
 	switch (req->type) {
 	case IPROTO_RAFT_CONFIRM:
 		txn_limbo_read_confirm(limbo, lsn);
+		/*
+		 * We have to adjust confirmed_lsn according
+		 * to LSN coming from the request. It is because
+		 * we will need to report it as old's limbo owner
+		 * LSN inside PROMOTE requests (if administrator
+		 * or election engine will make us so).
+		 *
+		 * We could update confirmed_lsn on every
+		 * txn_limbo_read_confirm call but this function
+		 * is usually called in a couple with
+		 * txn_limbo_write_confirm, thus to eliminate redundant
+		 * variables update we make so once but explicitly.
+		 */
+		limbo->confirmed_lsn = req->lsn;
 		break;
 	case IPROTO_RAFT_ROLLBACK:
 		txn_limbo_read_rollback(limbo, lsn);
