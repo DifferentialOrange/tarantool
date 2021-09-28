@@ -1249,7 +1249,7 @@ cfg_get_replication(int *p_count)
  * don't start appliers.
  */
 static void
-box_sync_replication(bool connect_quorum)
+box_sync_replication(bool strict)
 {
 	int count = 0;
 	struct applier **appliers = cfg_get_replication(&count);
@@ -1261,7 +1261,9 @@ box_sync_replication(bool connect_quorum)
 			applier_delete(appliers[i]); /* doesn't affect diag */
 	});
 
-	replicaset_connect(appliers, count, connect_quorum);
+	bool connect_quorum = strict;
+	bool keep_connect = !strict;
+	replicaset_connect(appliers, count, connect_quorum, keep_connect);
 
 	guard.is_active = false;
 }
