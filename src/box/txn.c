@@ -38,6 +38,7 @@
 #include "xrow.h"
 #include "errinj.h"
 #include "iproto_constants.h"
+#include "box.h"
 
 double too_long_threshold;
 
@@ -216,6 +217,8 @@ txn_new(void)
 inline static void
 txn_free(struct txn *txn)
 {
+	if (txn->rollback_timer != NULL)
+		ev_timer_stop(loop(), txn->rollback_timer);
 	memtx_tx_clean_txn(txn);
 	struct tx_read_tracker *tracker, *tmp;
 	rlist_foreach_entry_safe(tracker, &txn->read_set,
@@ -306,6 +309,8 @@ txn_begin(void)
 	rlist_create(&txn->savepoints);
 	memtx_tx_register_tx(txn);
 	txn->fiber = NULL;
+	txn->timeout = TIMEOUT_INFINITY;
+	txn->rollback_timer = NULL;
 	fiber_set_txn(fiber(), txn);
 	trigger_create(&txn->fiber_on_yield, txn_on_yield, NULL, NULL);
 	trigger_add(&fiber()->on_yield, &txn->fiber_on_yield);
@@ -709,6 +714,15 @@ txn_prepare(struct txn *txn)
 		diag_log();
 		return -1;
 	}
+	if (txn_has_flag(txn, TXN_IS_ABORTED_BY_TIMEOUT)) {
+		diag_set(ClientError, ER_TRANSACTION_TIMEOUT);
+		diag_log();
+		return -1;
+	}
+	if (txn->rollback_timer != NULL) {
+		ev_timer_stop(loop(), txn->rollback_timer);
+		txn->rollback_timer = NULL;
+	}
 	/*
 	 * If transaction has been started in SQL, deferred
 	 * foreign key constraints must not be violated.
@@ -1048,6 +1062,7 @@ box_txn_begin(void)
 	}
 	if (txn_begin() == NULL)
 		return -1;
+	txn_set_timeout(box_txn_timeout_default);
 	return 0;
 }
 
@@ -1227,6 +1242,16 @@ txn_on_stop(struct trigger *trigger, void *event)
 	return 0;
 }
 
+static void
+txn_on_timeout(ev_loop *loop, ev_timer *watcher, int revents)
+{
+	(void) loop;
+	(void) revents;
+	struct txn *txn = (struct txn *)watcher->data;
+	txn_rollback_to_svp(txn, NULL);
+	txn_set_flags(txn, TXN_IS_ABORTED_BY_TIMEOUT);
+}
+
 /**
  * Memtx yield-in-transaction trigger callback.
  *
@@ -1254,6 +1279,23 @@ txn_on_yield(struct trigger *trigger, void *event)
 	if (!txn_has_flag(txn, TXN_CAN_YIELD)) {
 		txn_rollback_to_svp(txn, NULL);
 		txn_set_flags(txn, TXN_IS_ABORTED_BY_YIELD);
+		return 0;
+	} else if (txn_has_flag(txn, TXN_IS_ABORTED_BY_TIMEOUT)) {
+		txn_rollback_to_svp(txn, NULL);
+		return 0;
+	}
+	if (txn->rollback_timer == NULL && txn->timeout != TIMEOUT_INFINITY) {
+		/* Setup rollback timer. */
+		int size;
+		txn->rollback_timer = region_alloc_object(&txn->region,
+							  struct ev_timer,
+							  &size);
+		if (txn->rollback_timer == NULL)
+			panic("Out of memory on creation of rollback timer");
+		ev_timer_init(txn->rollback_timer, txn_on_timeout,
+			      txn->timeout, 0);
+		txn->rollback_timer->data = txn;
+		ev_timer_start(loop(), txn->rollback_timer);
 	}
 	return 0;
 }
@@ -1279,4 +1321,12 @@ txn_attach(struct txn *txn)
 	fiber_set_txn(fiber(), txn);
 	trigger_add(&fiber()->on_yield, &txn->fiber_on_yield);
 	trigger_add(&fiber()->on_stop, &txn->fiber_on_stop);
+}
+
+void
+txn_set_timeout(double timeout)
+{
+	struct txn *txn = in_txn();
+	if (txn != NULL)
+		txn->timeout = timeout;
 }

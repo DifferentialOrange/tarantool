@@ -283,6 +283,7 @@ struct errcode_record {
 	/*228 */_(ER_SYNC_QUEUE_FOREIGN,	"The synchronous transaction queue belongs to other instance with id %u")\
 	/*226 */_(ER_UNABLE_TO_PROCESS_IN_STREAM, "Unable to process %s request in stream") \
 	/*227 */_(ER_UNABLE_TO_PROCESS_OUT_OF_STREAM, "Unable to process %s request out of stream") \
+	/*228 */_(ER_TRANSACTION_TIMEOUT,       "Transaction has been aborted by timeout") \
 
 /*
  * !IMPORTANT! Please follow instructions at start of the file

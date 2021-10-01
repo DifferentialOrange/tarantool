@@ -34,6 +34,8 @@ ffi.cdef[[
     typedef struct tuple box_tuple_t;
     typedef struct iterator box_iterator_t;
 
+    void
+    txn_set_timeout(double timeout);
     /** \cond public */
     box_iterator_t *
     box_index_iterator(uint32_t space_id, uint32_t index_id, int type,
@@ -328,9 +330,20 @@ local function feedback_save_event(event)
     end
 end
 
-box.begin = function()
+box.begin = function(options)
+    if options then
+        check_param(options, 'options', 'table')
+    end
+    local timeout = options and options["timeout"]
+    if timeout and (type(timeout) ~= "number" or timeout <= 0) then
+        box.error(box.error.ILLEGAL_PARAMS,
+                  "timeout must be a number greater than 0")
+    end
     if builtin.box_txn_begin() == -1 then
         box.error()
+    end
+    if timeout then
+        builtin.txn_set_timeout(timeout)
     end
 end
 

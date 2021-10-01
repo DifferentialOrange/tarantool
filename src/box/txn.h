@@ -91,6 +91,11 @@ enum txn_flag {
 	 * example, when applier receives snapshot from master.
 	 */
 	TXN_FORCE_ASYNC = 0x40,
+	/**
+	 * Transaction has been aborted by timeout so should be
+	 * rolled back at commit.
+	 */
+	TXN_IS_ABORTED_BY_TIMEOUT = 0x80,
 };
 
 enum {
@@ -428,6 +433,13 @@ struct txn {
 	struct rlist in_all_txs;
 	/** True in case transaction provides any DDL change. */
 	bool is_schema_changed;
+	/** Timeout for transaction, or TIMEOUT_INFINITY is not set. */
+	double timeout;
+	/**
+	 * Timer that is alarmed if the transaction did not have time
+	 * to complete within the timeout specified when it was created.
+	 */
+	struct ev_timer *rollback_timer;
 };
 
 static inline bool
@@ -545,6 +557,13 @@ txn_abort(struct txn *txn);
  */
 int
 txn_commit_try_async(struct txn *txn);
+
+/**
+ * Set @timeout for @txn, when it expires, transaction
+ * will be roll backed.
+ */
+void
+txn_set_timeout(double timeout);
 
 /**
  * Most txns don't have triggers, and txn objects
