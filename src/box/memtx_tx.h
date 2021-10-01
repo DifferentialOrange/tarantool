@@ -36,6 +36,7 @@
 #include "space.h"
 
 #include "small/rlist.h"
+#include "txn_stat.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -484,6 +485,16 @@ memtx_tx_snapshot_clarify(struct memtx_tx_snapshot_cleaner *cleaner,
  */
 void
 memtx_tx_snapshot_cleaner_destroy(struct memtx_tx_snapshot_cleaner *cleaner);
+
+struct mvcc_stat {
+	uint64_t total;
+	uint64_t min;
+	uint64_t max;
+};
+
+void
+mvcc_stat_calculate(struct mvcc_stat *region_stat, uint64_t *mempool_total,
+		    uint64_t *holded_tuples_total, void *buf, size_t buf_size);
 
 #if defined(__cplusplus)
 } /* extern "C" */

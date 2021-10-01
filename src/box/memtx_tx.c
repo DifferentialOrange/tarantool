@@ -231,6 +231,55 @@ bool memtx_tx_manager_use_mvcc_engine = false;
 static struct tx_manager txm;
 
 void
+mvcc_stat_calculate(struct mvcc_stat *region_stat, uint64_t *mempool_total,
+		    uint64_t *holded_tuples_total, void *buf, size_t buf_size)
+{
+	memset(region_stat, 0, sizeof(struct mvcc_stat));
+	struct txn *current_txn;
+
+	/* count txn num */
+	int64_t txn_num = 0;
+	rlist_foreach_entry(current_txn, &txm.all_txs, in_all_txs) {
+		txn_num++;
+	}
+
+	int64_t i = 0;
+	rlist_foreach_entry(current_txn, &txm.all_txs, in_all_txs) {
+		size_t used = region_used(&current_txn->region);
+		if (used < region_stat->min || i == 0) {
+			region_stat->min = used;
+		}
+		if (used > region_stat->max) {
+			region_stat->max = used;
+		}
+		region_stat->total += used;
+		++i;
+	}
+	mh_int_t pos;
+	uint64_t withheld_tuples = 0;
+	struct tuple *curr = NULL;
+	mh_foreach(txm.history, pos) {
+		curr = (*mh_history_node(txm.history, pos))->tuple;
+		printf("mhash element local_refs: %u\n", curr->local_refs);
+		if ((curr->local_refs == 1) && (!curr->has_uploaded_refs)) {
+			withheld_tuples += tuple_size(curr);
+			printf("data offset: %u\n", tuple_data_offset(curr));
+			printf("bsize: %u\n", tuple_bsize(curr));
+		}
+	}
+
+	uint64_t total = 0;
+	total += mempool_used(&txm.point_hole_item_pool);
+	total += mempool_used(&txm.gap_item_mempoool);
+	total += mempool_used(&txm.full_scan_item_mempool);
+	for (size_t pool_idx = 0; pool_idx < BOX_INDEX_MAX; ++pool_idx) {
+		total += mempool_used(&txm.memtx_tx_story_pool[pool_idx]);
+	}
+	*mempool_total = total;
+	*holded_tuples_total = withheld_tuples;
+}
+
+void
 memtx_tx_manager_init()
 {
 	rlist_create(&txm.read_view_txs);
@@ -375,7 +424,7 @@ memtx_tx_story_new(struct space *space, struct tuple *tuple)
 	uint32_t index_count = space->index_count;
 	assert(index_count < BOX_INDEX_MAX);
 	struct mempool *pool = &txm.memtx_tx_story_pool[index_count];
-	struct memtx_story *story = (struct memtx_story *) mempool_alloc(pool);
+	struct memtx_story *story = (struct memtx_story *) tx_mempool_alloc(in_txn(), pool, TXN_ALLOC_STORY);
 	if (story == NULL) {
 		size_t item_size = sizeof(struct memtx_story) +
 				   index_count *
@@ -446,7 +495,7 @@ memtx_tx_story_delete(struct memtx_story *story)
 #endif
 
 	struct mempool *pool = &txm.memtx_tx_story_pool[story->index_count];
-	mempool_free(pool, story);
+	tx_mempool_free(in_txn(), pool, story, TXN_ALLOC_STORY);
 }
 
 /**
@@ -1976,7 +2025,7 @@ memtx_tx_delete_gap(struct gap_item *item)
 {
 	rlist_del(&item->in_gap_list);
 	rlist_del(&item->in_nearby_gaps);
-	mempool_free(&txm.gap_item_mempoool, item);
+	tx_mempool_free(item->txn, &txm.gap_item_mempoool, item, TXN_ALLOC_TRACKER);
 }
 
 static void
@@ -1984,7 +2033,7 @@ memtx_tx_full_scan_item_delete(struct full_scan_item *item)
 {
 	rlist_del(&item->in_full_scan_list);
 	rlist_del(&item->in_full_scans);
-	mempool_free(&txm.full_scan_item_mempool, item);
+	tx_mempool_free(item->txn, &txm.full_scan_item_mempool, item, TXN_ALLOC_TRACKER);
 }
 
 void
@@ -2147,7 +2196,7 @@ point_hole_storage_new(struct index *index, const char *key,
 {
 	struct mempool *pool = &txm.point_hole_item_pool;
 	struct point_hole_item *object =
-		(struct point_hole_item *) mempool_alloc(pool);
+		(struct point_hole_item *) tx_mempool_alloc(txn, pool, TXN_ALLOC_TRACKER);
 	if (object == NULL) {
 		diag_set(OutOfMemory, sizeof(*object),
 			 "mempool_alloc", "point_hole_item");
@@ -2163,7 +2212,7 @@ point_hole_storage_new(struct index *index, const char *key,
 	} else {
 		object->key = (char *)region_alloc(&txn->region, key_len);
 		if (object->key == NULL) {
-			mempool_free(pool, object);
+			tx_mempool_free(txn, pool, object, TXN_ALLOC_TRACKER);
 			diag_set(OutOfMemory, key_len, "tx region",
 				 "point key");
 			return -1;
@@ -2240,7 +2289,7 @@ point_hole_storage_delete(struct point_hole_item *object)
 	}
 	rlist_del(&object->in_point_holes_list);
 	struct mempool *pool = &txm.point_hole_item_pool;
-	mempool_free(pool, object);
+	tx_mempool_free(object->txn, pool, object, TXN_ALLOC_TRACKER);
 }
 
 /**
@@ -2269,7 +2318,7 @@ memtx_tx_gap_item_new(struct txn *txn, enum iterator_type type,
 		      const char *key, uint32_t part_count)
 {
 	struct gap_item *item = (struct gap_item *)
-		mempool_alloc(&txm.gap_item_mempoool);
+		tx_mempool_alloc(txn, &txm.gap_item_mempoool, TXN_ALLOC_TRACKER);
 	if (item == NULL) {
 		diag_set(OutOfMemory, sizeof(*item), "mempool_alloc", "gap");
 		return NULL;
@@ -2289,7 +2338,7 @@ memtx_tx_gap_item_new(struct txn *txn, enum iterator_type type,
 	} else {
 		item->key = (char *)region_alloc(&txn->region, item->key_len);
 		if (item->key == NULL) {
-			mempool_free(&txm.gap_item_mempoool, item);
+			tx_mempool_free(txn, &txm.gap_item_mempoool, item, TXN_ALLOC_TRACKER);
 			diag_set(OutOfMemory, item->key_len, "tx region",
 				 "point key");
 			return NULL;
@@ -2329,7 +2378,7 @@ memtx_tx_track_gap_slow(struct txn *txn, struct space *space, struct index *inde
 		} else {
 			story = memtx_tx_story_new(space, successor);
 			if (story == NULL) {
-				mempool_free(&txm.gap_item_mempoool, item);
+				tx_mempool_free(txn, &txm.gap_item_mempoool, item, TXN_ALLOC_TRACKER);
 				return -1;
 			}
 		}
@@ -2347,7 +2396,7 @@ static struct full_scan_item *
 memtx_tx_full_scan_item_new(struct txn *txn)
 {
 	struct full_scan_item *item = (struct full_scan_item *)
-		mempool_alloc(&txm.full_scan_item_mempool);
+		tx_mempool_alloc(txn, &txm.full_scan_item_mempool, TXN_ALLOC_TRACKER);
 	if (item == NULL) {
 		diag_set(OutOfMemory, sizeof(*item), "mempool_alloc",
 			 "full_scan_item");

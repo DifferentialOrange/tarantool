@@ -93,11 +93,12 @@ txn_add_redo(struct txn *txn, struct txn_stmt *stmt, struct request *request)
 
 /** Initialize a new stmt object within txn. */
 static struct txn_stmt *
-txn_stmt_new(struct region *region)
+txn_stmt_new(struct txn *txn)
 {
 	int size;
 	struct txn_stmt *stmt;
-	stmt = region_alloc_object(region, struct txn_stmt, &size);
+	stmt = tx_region_alloc_object(txn, struct txn_stmt,
+				      &size, TXN_ALLOC_STMT);
 	if (stmt == NULL) {
 		diag_set(OutOfMemory, size, "region_alloc_object", "stmt");
 		return NULL;
@@ -247,7 +248,7 @@ txn_free(struct txn *txn)
 		txn_stmt_destroy(stmt);
 
 	/* Truncate region up to struct txn size. */
-	region_truncate(&txn->region, sizeof(struct txn));
+	tx_region_truncate(txn);
 	stailq_add(&txn_cache, &txn->in_txn_cache);
 }
 
@@ -356,7 +357,7 @@ txn_begin_stmt(struct txn *txn, struct space *space, uint16_t type)
 		return -1;
 	}
 
-	struct txn_stmt *stmt = txn_stmt_new(&txn->region);
+	struct txn_stmt *stmt = txn_stmt_new(txn);
 	if (stmt == NULL)
 		return -1;
 
