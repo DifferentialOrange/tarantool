@@ -826,9 +826,16 @@ local function stream_new_stream(stream)
     return stream._conn:new_stream()
 end
 
-local function stream_begin(stream, opts)
+local function stream_begin(stream, args, opts)
     check_remote_arg(stream, 'begin')
-    local res = stream:_request(M_BEGIN, opts, nil, stream._stream_id)
+    if args ~= nil and type(args) ~= 'table' then
+        error("Use remote:begin({timeout})")
+    end
+    local timeout = args and args.timeout
+    if timeout and (type(timeout) ~= "number" or timeout <= 0) then
+        error("timeout must be a number greater than 0")
+    end
+    local res = stream:_request(M_BEGIN, opts, nil, stream._stream_id, timeout)
     if opts and opts.is_async then
         return res
     end

@@ -845,6 +845,21 @@ xrow_to_iovec(const struct xrow_header *row, struct iovec *out);
 void
 xrow_decode_error(struct xrow_header *row);
 
+struct txn_request {
+	double timeout;
+};
+
+/**
+ * Parse the BEGIN request.
+ * @param row Encoded data.
+ * @param[out] request Request to decode to.
+ *
+ * @retval  0 Sucess.
+ * @retval -1 Format error.
+ */
+int
+xrow_decode_txn(const struct xrow_header *row, struct txn_request *request);
+
 /**
  * Update vclock with the next LSN value for given replica id.
  * The function will cause panic if the next LSN happens to be

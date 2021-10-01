@@ -1010,9 +1010,7 @@ netbox_encode_txn(lua_State *L, enum iproto_type type, int idx,
 {
 	(void)L;
 	(void) idx;
-	assert(type == IPROTO_BEGIN ||
-	       type == IPROTO_COMMIT ||
-	       type == IPROTO_ROLLBACK);
+	assert(type == IPROTO_COMMIT || type == IPROTO_ROLLBACK);
 	size_t svp = netbox_begin_encode(stream, sync, type, stream_id);
 	netbox_end_encode(stream, svp);
 }
@@ -1021,8 +1019,16 @@ static void
 netbox_encode_begin(struct lua_State *L, int idx, struct mpstream *stream,
 		    uint64_t sync, uint64_t stream_id)
 {
-	return netbox_encode_txn(L, IPROTO_BEGIN, idx, stream,
-				 sync, stream_id);
+	size_t svp = netbox_begin_encode(stream, sync, IPROTO_BEGIN, stream_id);
+	if (!lua_isnoneornil(L, idx)) {
+		assert(lua_type(L, idx) == LUA_TNUMBER);
+		double timeout = lua_tonumber(L, idx);
+		assert(timeout > 0);
+		mpstream_encode_map(stream, 1);
+		mpstream_encode_uint(stream, IPROTO_TIMEOUT);
+		mpstream_encode_double(stream, timeout);
+	}
+	netbox_end_encode(stream, svp);
 }
 
 static void
