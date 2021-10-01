@@ -1,0 +1,87 @@
+test_run = require('test_run').new()
+---
+...
+netbox = require('net.box')
+---
+...
+fio = require('fio')
+---
+...
+fiber = require('fiber')
+---
+...
+errinj = box.error.injection
+---
+...
+-- Check that an invalid listening uri
+-- does not make tarantool blind.
+bad_uri = "baduribaduri:1"
+---
+...
+old_listen = box.cfg.listen
+---
+...
+conn = netbox.connect(old_listen)
+---
+...
+assert(conn:ping())
+---
+- true
+...
+box.cfg({ listen = bad_uri })
+---
+- error: can't resolve uri for bind, called on fd -1
+...
+assert(conn:ping())
+---
+- true
+...
+assert(fio.path.exists(old_listen))
+---
+- true
+...
+assert(box.cfg.listen == old_listen)
+---
+- true
+...
+-- Check that failure in listen does
+-- not make tarantool blind and not
+-- leads to unreleased resources.
+errinj.set("ERRINJ_IPROTO_CFG_LISTEN", true)
+---
+- ok
+...
+new_listen = old_listen .. "A"
+---
+...
+conn = netbox.connect(old_listen)
+---
+...
+assert(conn:ping())
+---
+- true
+...
+box.cfg({ listen = new_listen })
+---
+- error: Error injection 'Iproto listen fail'
+...
+test_run:wait_cond(function() return fio.path.exists(old_listen) end)
+---
+- true
+...
+test_run:wait_cond(function() return not fio.path.exists(new_listen) end)
+---
+- true
+...
+assert(conn:ping())
+---
+- true
+...
+assert(box.cfg.listen == old_listen)
+---
+- true
+...
+errinj.set("ERRINJ_IPROTO_CFG_LISTEN", false)
+---
+- ok
+...

@@ -2926,6 +2926,11 @@ iproto_do_cfg_f(struct cbus_call_msg *m)
 				iproto_resume(iproto_thread);
 			break;
 		case IPROTO_CFG_LISTEN:
+			ERROR_INJECT(ERRINJ_IPROTO_CFG_LISTEN, {
+				diag_set(ClientError, ER_INJECTION,
+					 "Iproto listen fail");
+				return -1;
+			});
 			if (evio_service_is_active(&iproto_thread->binary)) {
 				diag_set(ClientError, ER_UNSUPPORTED, "Iproto",
 					 "listen if service already active");

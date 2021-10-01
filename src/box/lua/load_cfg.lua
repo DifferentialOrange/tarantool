@@ -615,6 +615,9 @@ local function reload_cfg(oldcfg, cfg)
             rawset(oldcfg, key, val)
             if not pcall(dynamic_cfg[key]) then
                 rawset(oldcfg, key, oldval) -- revert the old value
+                if key == "listen" then
+                    pcall(dynamic_cfg[key])
+                end
                 return box.error() -- re-throw
             end
             if log_cfg_option[key] ~= nil then
