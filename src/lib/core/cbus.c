@@ -433,7 +433,12 @@ cbus_call(struct cpipe *callee, struct cpipe *caller, struct cbus_call_msg *msg,
 
 	cpipe_push(callee, cmsg(msg));
 
-	fiber_yield_timeout(timeout);
+	if (timeout == TIMEOUT_INFINITY) {
+		while (msg->complete == false)
+			fiber_yield();
+	} else {
+		fiber_yield_timeout(timeout);
+	}
 	if (msg->complete == false) {           /* timed out or cancelled */
 		msg->caller = NULL;
 		if (fiber_is_cancelled())
