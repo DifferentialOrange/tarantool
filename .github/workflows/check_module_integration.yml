@@ -1,0 +1,64 @@
+name: check_module_integration
+
+on:
+  push:
+    branches:
+      - 'master'
+      - '[0-9].[0-9]+*'  # release branches
+      - 'ylobankov/add-workflow-to-check-module-integration-notest'  # remove this after testing
+  workflow_dispatch:
+
+env:
+  OS: ubuntu
+  DIST: focal
+  BUILD_WORKFLOW: build_tarantool.yml
+  TEST_WORKFLOW: artifact_testing.yml
+
+jobs:
+  build_tarantool:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Build tarantool packages
+        uses: convictional/trigger-workflow-and-wait@v1.3.0
+        with:
+          owner: ${{ github.repository_owner }}
+          repo: tarantool
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow_file_name: ${{ env.BUILD_WORKFLOW }}
+          ref: ${{ github.ref }}
+          inputs: |
+            {"ref": "${{ github.ref }}",
+            "os": "${{ env.OS }}",
+            "dist": "${{ env.DIST }}"}
+          wait_interval: 10
+          propagate_failure: true
+          trigger_workflow: true
+          wait_workflow: true
+
+  run_module_tests:
+    needs: build_tarantool
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - vshard
+    steps:
+      - name: Run ${{ matrix.module }} tests
+        uses: convictional/trigger-workflow-and-wait@v1.3.0
+        with:
+          owner: ${{ github.repository_owner }}
+          repo: ${{ matrix.module }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow_file_name: ${{ env.TEST_WORKFLOW }}
+          #ref: refs/heads/master
+          ref: refs/heads/ylobankov/add-workflow-to-run-against-tarantool-artifact  # remove this after testing
+          inputs: |
+            {"repository": "${{ github.repository }}",
+            "workflow": "${{ env.BUILD_WORKFLOW }}",
+            "sha": "${{ github.sha }}",
+            "artifact": "${{ env.OS }}-${{ env.DIST }}"}
+          wait_interval: 10
+          propagate_failure: true
+          trigger_workflow: true
+          wait_workflow: true
