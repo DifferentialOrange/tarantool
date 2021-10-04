@@ -12,7 +12,6 @@ g.before_all(function()
         command = './test/replication-luatest/instance_files/master.lua',
         workdir = fio.tempdir(),
         env = {TARANTOOL_REPLICA = '13302'},
-        http_port = 8081,
         net_box_port = 13301,
     })
 
@@ -21,7 +20,6 @@ g.before_all(function()
         command = './test/replication-luatest/instance_files/replica.lua',
         workdir = fio.tempdir(),
         env = {TARANTOOL_MASTER = '13301'},
-        http_port = 8082,
         net_box_port = 13302,
     })
 
