@@ -19,6 +19,9 @@
 #include "say.h"
 #include "tarantool_ev.h"
 
+#if TARGET_OS_LINUX
+# include <sys/prctl.h>
+#endif
 #if TARGET_OS_DARWIN
 # include <sys/ioctl.h>
 #endif
@@ -1154,6 +1157,8 @@ popen_new(struct popen_opts *opts)
 	int saved_errno;
 	size_t i;
 
+	pid_t ppid_before_fork = getpid();
+
 	/*
 	 * At max we could be skipping each pipe end
 	 * plus dev/null variants and logfd
@@ -1310,6 +1315,22 @@ popen_new(struct popen_opts *opts)
 		 */
 		if (opts->flags & POPEN_FLAG_RESTORE_SIGNALS)
 			signal_reset();
+
+		// https://stackoverflow.com/a/59216119
+		// FreeBSD: https://illumos.topicbox.com/groups/developer/T590aacef9f797980/freebsd-procctl-linux-prctl-equivalent
+		if ((opts->flags & POPEN_FLAG_KEEP_CHILD) == 0) {
+#if TARGET_OS_LINUX
+			int r = prctl(PR_SET_PDEATHSIG, SIGKILL);
+			if (r == -1) {
+				say_syserror("child: prctl failed");
+				goto exit_child;
+			}
+#endif
+			if (getppid() != ppid_before_fork) {
+				say_syserror("child: parent is dead");
+				goto exit_child;
+			}
+		}
 
 		if (opts->flags & POPEN_FLAG_SETSID) {
 #if !TARGET_OS_DARWIN
