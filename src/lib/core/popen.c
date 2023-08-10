@@ -23,7 +23,9 @@
 # include <sys/prctl.h>
 #endif
 #if TARGET_OS_DARWIN
+# include <sys/event.h>
 # include <sys/ioctl.h>
+# include <CoreFoundation/CoreFoundation.h>
 #endif
 
 #define POPEN_WAIT_LEADERSHIP_DELAY 0.01
@@ -1090,6 +1092,20 @@ popen_wait_group_leadership(pid_t pid)
 }
 #endif
 
+#if TARGET_OS_DARWIN
+#define UNUSED_PARAMETER(x) (void)(x)
+void noteProcDeath(CFFileDescriptorRef fdref, CFOptionFlags callBackTypes, void* info) {
+	UNUSED_PARAMETER(callBackTypes);
+	UNUSED_PARAMETER(info);
+	struct kevent kev;
+	int fd = CFFileDescriptorGetNativeDescriptor(fdref);
+	kevent(fd, NULL, 0, &kev, 1, NULL);
+	CFFileDescriptorInvalidate(fdref);
+	CFRelease(fdref);
+	exit(EXIT_SUCCESS);
+}
+#endif
+
 /**
  * Create new popen handle.
  *
@@ -1325,6 +1341,16 @@ popen_new(struct popen_opts *opts)
 				say_syserror("child: prctl failed");
 				goto exit_child;
 			}
+#elif TARGET_OS_DARWIN
+			int fd = kqueue();
+			struct kevent kev;
+			EV_SET(&kev, ppid_before_fork, EVFILT_PROC, EV_ADD|EV_ENABLE, NOTE_EXIT, 0, NULL);
+			kevent(fd, &kev, 1, NULL, 0, NULL);
+			CFFileDescriptorRef fdref = CFFileDescriptorCreate(kCFAllocatorDefault, fd, true, noteProcDeath, NULL);
+			CFFileDescriptorEnableCallBacks(fdref, kCFFileDescriptorReadCallBack);
+			CFRunLoopSourceRef source = CFFileDescriptorCreateRunLoopSource(kCFAllocatorDefault, fdref, 0);
+			CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopDefaultMode);
+			CFRelease(source);
 #endif
 			if (getppid() != ppid_before_fork) {
 				say_syserror("child: parent is dead");
