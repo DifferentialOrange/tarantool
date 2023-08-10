@@ -74,15 +74,6 @@ if (TARGET_OS_NETBSD)
         -fno-exceptions)
 endif()
 
-if (TARGET_OS_DARWIN)
-    find_library(COREFOUNDATION_FRAMEWORK "CoreFoundation")
-    if(NOT COREFOUNDATION_FRAMEWORK)
-        message(FATAL_ERROR "CoreFoundation framework not found")
-    endif()
-
-    list(APPEND EXTRA_CORE_LINK_LIBRARIES "-framework CoreFoundation")
-endif()
-
 add_library(core STATIC ${core_sources})
 
 target_link_libraries(core salad small uri decNumber bit tzcode misc

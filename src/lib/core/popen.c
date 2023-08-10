@@ -25,7 +25,6 @@
 #if TARGET_OS_DARWIN
 # include <sys/event.h>
 # include <sys/ioctl.h>
-# include <CoreFoundation/CoreFoundation.h>
 #endif
 
 #define POPEN_WAIT_LEADERSHIP_DELAY 0.01
@@ -1093,16 +1092,27 @@ popen_wait_group_leadership(pid_t pid)
 #endif
 
 #if TARGET_OS_DARWIN
-#define UNUSED_PARAMETER(x) (void)(x)
-void noteProcDeath(CFFileDescriptorRef fdref, CFOptionFlags callBackTypes, void* info) {
-	UNUSED_PARAMETER(callBackTypes);
-	UNUSED_PARAMETER(info);
+void *popen_process_death_sig_darwin(void* rawdata) {
+	popen_process_death_sig_darwin_data data = *(popen_process_death_sig_darwin_data*)rawdata;
+
+	int fd = kqueue();
 	struct kevent kev;
-	int fd = CFFileDescriptorGetNativeDescriptor(fdref);
-	kevent(fd, NULL, 0, &kev, 1, NULL);
-	CFFileDescriptorInvalidate(fdref);
-	CFRelease(fdref);
-	exit(EXIT_SUCCESS);
+	EV_SET(&kev, data.ppid, EVFILT_PROC, EV_ADD|EV_ENABLE, NOTE_EXIT, 0, NULL);
+	kevent(fd, &kev, 1, NULL, 0, NULL);
+
+	while (getppid() != data.ppid) {
+		struct timespec *timeout = NULL; // wait indefinitely
+		struct kevent events[1];
+		int n = kevent(fd, NULL, 0, events, 1, &timeout);
+		if (n < 0 && errno == EINTR)
+			continue; // kevent() interrupts when UNIX signal is received
+	}
+
+	pid_t pid = getpid();
+	if data.group_signal_set
+		ret = killpg(pid, SIGKILL);
+	else
+		ret = kill(pid, SIGKILL);
 }
 #endif
 
@@ -1342,15 +1352,14 @@ popen_new(struct popen_opts *opts)
 				goto exit_child;
 			}
 #elif TARGET_OS_DARWIN
-			int fd = kqueue();
-			struct kevent kev;
-			EV_SET(&kev, ppid_before_fork, EVFILT_PROC, EV_ADD|EV_ENABLE, NOTE_EXIT, 0, NULL);
-			kevent(fd, &kev, 1, NULL, 0, NULL);
-			CFFileDescriptorRef fdref = CFFileDescriptorCreate(kCFAllocatorDefault, fd, true, noteProcDeath, NULL);
-			CFFileDescriptorEnableCallBacks(fdref, kCFFileDescriptorReadCallBack);
-			CFRunLoopSourceRef source = CFFileDescriptorCreateRunLoopSource(kCFAllocatorDefault, fdref, 0);
-			CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopDefaultMode);
-			CFRelease(source);
+			pthread_attr_t attr;
+			pthread_attr_init(&attr);
+
+			pthread_t thread;
+			popen_process_death_sig_darwin_data data;
+			data.ppid = ppid_before_fork;
+			data.group_signal_set = opts->flags & POPEN_FLAG_GROUP_SIGNAL;
+			pthread_create(&thread, &attr, run, &data);
 #endif
 			if (getppid() != ppid_before_fork) {
 				say_syserror("child: parent is dead");

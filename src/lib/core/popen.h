@@ -201,6 +201,13 @@ popen_init(void);
 extern void
 popen_free(void);
 
+#if TARGET_OS_DARWIN
+struct popen_process_death_sig_darwin_data {
+	pid_t ppid;
+	int group_signal_set;
+};
+#endif
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
