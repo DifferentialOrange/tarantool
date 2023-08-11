@@ -1087,16 +1087,24 @@ popen_wait_group_leadership(pid_t pid)
 }
 #endif
 
-void* check_parent(void* args) {
-	int deathfd = (int)args;
+struct check_parent_args {
+	int deathfd;
+	int group_signal_set;
+};
+
+void* check_parent(void* rawargs) {
+	struct check_parent_args args = *(struct check_parent_args*)rawargs; 
 	char buffer[8];
 
-	if (read(deathfd, buffer, sizeof buffer) == 0) {
-        	printf("Child process (%ld): Parent process is already dead.\n", (long)getpid());
-        	exit(EXIT_FAILURE);
-        }
+	if (read(args.deathfd, buffer, sizeof buffer) == 0) {
+		pid_t pid = getpid();
+		if (args.group_signal_set)
+			killpg(pid, SIGKILL);
+		else
+			kill(pid, SIGKILL);
+	}
 
-        return NULL;
+	return NULL;
 }
 
 /**
@@ -1305,7 +1313,7 @@ popen_new(struct popen_opts *opts)
 		int deathfd = death_pipefd[0];
         	close(death_pipefd[1]);
 
-		fcntl(deathfd, F_SETSIG, SIGHUP);
+		// fcntl(deathfd, F_SETSIG, SIGHUP);
 
         	/* We want the SIGHUP delivered when deathfd closes. */
         	fcntl(deathfd, F_SETOWN, getpid());
@@ -1317,7 +1325,10 @@ popen_new(struct popen_opts *opts)
 		pthread_attr_init(&attr);
 
 		pthread_t thread;
-		pthread_create(&thread, &attr, check_parent, (void*)deathfd);
+		struct check_parent_args args;
+		args.deathfd = deathfd;
+		args.group_signal_set = opts->flags & POPEN_FLAG_GROUP_SIGNAL;
+		pthread_create(&thread, &attr, check_parent, (void*)&args);
 
 		/*
 		 * The documentation for libev says that
