@@ -1087,6 +1087,18 @@ popen_wait_group_leadership(pid_t pid)
 }
 #endif
 
+void* check_parent(void* args) {
+	int deathfd = (int)args;
+	char buffer[8];
+
+	if (read(deathfd, buffer, sizeof buffer) == 0) {
+        	printf("Child process (%ld): Parent process is already dead.\n", (long)getpid());
+        	exit(EXIT_FAILURE);
+        }
+
+        return NULL;
+}
+
 /**
  * Create new popen handle.
  *
@@ -1221,6 +1233,16 @@ popen_new(struct popen_opts *opts)
 	skip_fds[nr_skip_fds++] = dev_null_fd_wr;
 	assert(nr_skip_fds <= lengthof(skip_fds));
 
+	int death_pipefd[2];
+	if (pipe(death_pipefd) == -1) {
+           say_debug("popen: failed to create death pipe");
+           exit(EXIT_FAILURE);
+       }
+
+	skip_fds[nr_skip_fds++] = death_pipefd[0];
+	skip_fds[nr_skip_fds++] = death_pipefd[1];
+	assert(nr_skip_fds <= lengthof(skip_fds));
+
 	for (i = 0; i < lengthof(pfd_map); i++) {
 		if (opts->flags & pfd_map[i].mask) {
 			if (make_pipe(pfd[i]))
@@ -1279,6 +1301,24 @@ popen_new(struct popen_opts *opts)
 		diag_set(SystemError, "vfork() fails");
 		goto out_err;
 	} else if (handle->pid == 0) {
+		/* Close write end of pipe. */
+		int deathfd = death_pipefd[0];
+        	close(death_pipefd[1]);
+
+		fcntl(deathfd, F_SETSIG, SIGHUP);
+
+        	/* We want the SIGHUP delivered when deathfd closes. */
+        	fcntl(deathfd, F_SETOWN, getpid());
+
+        	/* Make the deathfd (read end of pipe) nonblocking and async. */
+        	fcntl(deathfd, F_SETFL, O_NONBLOCK | O_ASYNC);
+
+        	pthread_attr_t attr;
+		pthread_attr_init(&attr);
+
+		pthread_t thread;
+		pthread_create(&thread, &attr, check_parent, (void*)deathfd);
+
 		/*
 		 * The documentation for libev says that
 		 * each new fork should call ev_loop_fork(EV_DEFAULT)
@@ -1427,6 +1467,8 @@ exit_child:
 		_exit(errno);
 		unreachable();
 	}
+
+	close(death_pipefd[0]);
 
 	/*
 	 * Suspend the parent process (tx thread) execution until
